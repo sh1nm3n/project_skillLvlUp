@@ -1,9 +1,9 @@
 // Files Manager Module - Управление файлами и заметками для SkillLvlUp
-
 class FilesManager {
     constructor(app) {
         this.app = app;
         this.activeLesson = null;
+        this.activeCourse = null;
         this.modal = null;
     }
 
@@ -58,13 +58,13 @@ class FilesManager {
                     </div>
                     <div class="file-info">
                         <div class="file-name">${file.name}</div>
-                        <div class="file-meta">${file.size} • ${new Date(file.uploadDate).toLocaleDateString('ru-RU')}</div>
+                        <div class="file-meta">${file.size} • ${new Date(file.uploaded_at || file.uploadDate).toLocaleDateString('ru-RU')}</div>
                     </div>
                     <div class="file-actions">
                         <button class="file-action-btn" onclick="app.filesManager.downloadFile(${index})" title="Скачать">
                             <i class="fas fa-download"></i>
                         </button>
-                        <button class="file-action-btn delete" onclick="app.filesManager.deleteFile(${index})" title="Удалить">
+                        <button class="file-action-btn delete" onclick="app.filesManager.deleteFile(${file.id || index})" title="Удалить">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -73,61 +73,71 @@ class FilesManager {
         }).join('');
     }
 
-    saveNotes() {
+    // ✅ ИСПРАВЛЕНО: Используем API вместо localStorage
+    async saveNotes() {
         if (!this.activeLesson) return;
         
-        this.activeLesson.notes = document.getElementById('lesson-notes').value;
-        this.app.saveToStorage();
-        this.app.showToast('Заметки сохранены!', 'success');
-    }
-
-    handleFileUpload(files) {
-        if (!this.activeLesson) return;
+        const notes = document.getElementById('lesson-notes').value;
         
-        if (!this.activeLesson.files) {
-            this.activeLesson.files = [];
+        try {
+            await this.app.api.updateLessonNotes(this.activeLesson.id, notes);
+            this.activeLesson.notes = notes;
+            this.app.showToast('Заметки сохранены!', 'success');
+        } catch (error) {
+            this.app.showToast(error.message, 'error');
         }
-
-        Array.from(files).forEach(file => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const fileData = {
-                    name: file.name,
-                    type: file.type,
-                    size: this.formatFileSize(file.size),
-                    uploadDate: new Date().toISOString(),
-                    content: e.target.result
-                };
-                this.activeLesson.files.push(fileData);
-                this.app.saveToStorage();
-                this.renderFilesList();
-                this.app.renderLessonList();
-                this.app.showToast(`Файл "${file.name}" загружен!`, 'success');
-            };
-            reader.readAsDataURL(file);
-        });
     }
 
-    downloadFile(fileIndex) {
+    // ✅ ИСПРАВЛЕНО: Используем API вместо localStorage
+    async handleFileUpload(files) {
+        if (!this.activeLesson || !this.activeCourse) return;
+        
+        try {
+            for (const file of files) {
+                await this.app.api.uploadFile(this.activeLesson.id, file);
+            }
+            
+            // Перезагружаем курс чтобы получить обновленный список файлов
+            await this.app.loadCourseDetail(this.activeCourse.id);
+            this.renderFilesList();
+            this.app.renderLessonList();
+            this.app.showToast('Файл(ы) загружены!', 'success');
+        } catch (error) {
+            this.app.showToast(error.message, 'error');
+        }
+    }
+
+    async downloadFile(fileIndex) {
         if (!this.activeLesson || !this.activeLesson.files[fileIndex]) return;
         
         const file = this.activeLesson.files[fileIndex];
-        const link = document.createElement('a');
-        link.href = file.content;
-        link.download = file.name;
-        link.click();
+        
+        // Если есть URL для скачивания с сервера
+        if (file.path) {
+            const link = document.createElement('a');
+            link.href = `http://localhost:3000/${file.path}`;
+            link.download = file.original_name || file.name;
+            link.click();
+        }
+        
         this.app.showToast('Файл загружен!', 'success');
     }
 
-    deleteFile(fileIndex) {
-        if (!this.activeLesson || !this.activeLesson.files[fileIndex]) return;
+    async deleteFile(fileId) {
+        if (!this.activeLesson || !this.activeCourse) return;
         
         if (confirm('Вы уверены, что хотите удалить этот файл?')) {
-            this.activeLesson.files.splice(fileIndex, 1);
-            this.app.saveToStorage();
-            this.renderFilesList();
-            this.app.renderLessonList();
-            this.app.showToast('Файл удален!', 'success');
+            try {
+                await this.app.api.deleteFile(fileId);
+                
+                // Перезагружаем курс
+                await this.app.loadCourseDetail(this.activeCourse.id);
+                this.renderFilesList();
+                this.app.renderLessonList();
+                this.app.showToast('Файл удален!', 'success');
+            } catch (error) {
+                this.app.showToast(error.message, 'error');
+            }
         }
     }
 
@@ -183,9 +193,9 @@ class FilesManager {
             });
         });
 
-        // Save notes
-        document.getElementById('save-lesson-notes')?.addEventListener('click', () => {
-            this.saveNotes();
+        // Save notes - ✅ ИСПРАВЛЕНО: async
+        document.getElementById('save-lesson-notes')?.addEventListener('click', async () => {
+            await this.saveNotes();
         });
 
         // File upload

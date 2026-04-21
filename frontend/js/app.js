@@ -1,4 +1,4 @@
-// app.js - Оптимизированная версия
+// app.js - Исправленная версия
 class SkillLvlUpApp {
     constructor() {
         this.currentUser = null;
@@ -10,84 +10,88 @@ class SkillLvlUpApp {
         this.courseToDelete = null;
         this.calendar = null;
         this.filesManager = null;
+        this.api = new ApiService('http://localhost:3000/api');
         this.init();
     }
 
-    init() {
-        this.loadFromStorage();
+    async init() {
+        await this.checkAuth();
         this.initModules();
         this.bindEvents();
         this.currentUser ? this.showApp() : this.showAuth();
     }
 
-    initModules() {
-        this.calendar = new CalendarManager(this);
-        this.calendar.init('calendar-widget');
-        this.filesManager = new FilesManager(this);
-        this.filesManager.init();
+    async checkAuth() {
+        if (this.api.token) {
+            try {
+                const response = await this.api.getProfile();
+                this.currentUser = response.user;
+                await this.loadCourses();
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                this.api.clearToken();
+                this.currentUser = null;
+            }
+        }
     }
 
-    loadFromStorage() {
-        const user = localStorage.getItem('skilllvlup_user');
-        const courses = localStorage.getItem('skilllvlup_courses');
-        this.currentUser = user ? JSON.parse(user) : null;
-        this.courses = courses ? JSON.parse(courses) : [];
+    async loadCourses() {
+        try {
+            const response = await this.api.getCourses();
+            this.courses = response.courses || [];
+            
+            // ✅ Конвертируем даты для календаря
+            this.courses.forEach(course => {
+                if (course.start_date && !course.startDate) {
+                    course.startDate = course.start_date;
+                }
+                if (course.end_date && !course.endDate) {
+                    course.endDate = course.end_date;
+                }
+                if (course.lessons) {
+                    course.lessons.forEach(lesson => {
+                        if (lesson.lesson_date && !lesson.date) {
+                            lesson.date = lesson.lesson_date;
+                        }
+                    });
+                }
+            });
+        } catch (error) {
+            console.error('Failed to load courses:', error);
+            this.courses = [];
+        }
     }
 
-    saveToStorage() {
-        if (this.currentUser) localStorage.setItem('skilllvlup_user', JSON.stringify(this.currentUser));
-        localStorage.setItem('skilllvlup_courses', JSON.stringify(this.courses));
+    async register(name, email, password) {
+        try {
+            const response = await this.api.register(name, email, password);
+            this.currentUser = response.user;
+            await this.loadCourses();
+            this.showApp();
+            this.showToast('Аккаунт успешно создан!', 'success');
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
     }
 
-    getDateOffset(days) {
-        const date = new Date();
-        date.setDate(date.getDate() + days);
-        return date.toISOString().split('T')[0];
-    }
-
-    getTodayDate() {
-        return new Date().toISOString().split('T')[0];
-    }
-
-    showAuth() {
-        document.getElementById('auth-container').style.display = 'flex';
-        document.getElementById('app-layout').style.display = 'none';
-    }
-
-    showApp() {
-        document.getElementById('auth-container').style.display = 'none';
-        document.getElementById('app-layout').style.display = 'flex';
-        this.updateUserInfo();
-        this.navigateTo('dashboard');
-    }
-
-    login(email) {
-        this.currentUser = {
-            name: 'Иван Иванов',
-            email,
-            initials: this.getInitials('Иван Иванов')
-        };
-        this.saveToStorage();
-        this.showApp();
-        this.showToast('Добро пожаловать!', 'success');
-    }
-
-    register(name, email) {
-        this.currentUser = {
-            name,
-            email,
-            initials: this.getInitials(name)
-        };
-        this.saveToStorage();
-        this.showApp();
-        this.showToast('Аккаунт создан!', 'success');
+    async login(email, password) {
+        try {
+            const response = await this.api.login(email, password);
+            this.currentUser = response.user;
+            await this.loadCourses();
+            this.showApp();
+            this.showToast('Добро пожаловать!', 'success');
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
     }
 
     logout() {
         this.currentUser = null;
-        localStorage.removeItem('skilllvlup_user');
+        this.courses = [];
+        this.api.clearToken();
         this.showAuth();
-        this.showToast('Вы вышли', 'info');
+        this.showToast('Вы вышли из системы', 'info');
     }
 
     getInitials(name) {
@@ -134,14 +138,19 @@ class SkillLvlUpApp {
 
     renderDashboard() {
         const activeCourses = this.courses.filter(c => c.status === 'active').length;
-        const completedLessons = this.courses.reduce((acc, c) => acc + c.lessons.filter(l => l.completed).length, 0);
+        const completedLessons = this.courses.reduce((acc, c) => {
+            const lessons = c.lessons || [];
+            return acc + lessons.filter(l => l.completed).length;
+        }, 0);
         const now = new Date();
         const upcomingDeadlines = this.courses.filter(c => {
-            const diffDays = Math.ceil((new Date(c.endDate) - now) / (1000 * 60 * 60 * 24));
+            const endDate = c.endDate || c.end_date;
+            if (!endDate) return false;
+            const diffDays = Math.ceil((new Date(endDate) - now) / (1000 * 60 * 60 * 24));
             return diffDays <= 7 && c.status === 'active';
         }).length;
         const totalFiles = this.courses.reduce((acc, c) => 
-            acc + c.lessons.reduce((lAcc, l) => lAcc + (l.files?.length || 0) + (l.notes ? 1 : 0), 0), 0);
+            acc + (c.lessons || []).reduce((lAcc, l) => lAcc + (l.files?.length || 0) + (l.notes ? 1 : 0), 0), 0);
 
         document.getElementById('stat-active-courses').textContent = activeCourses;
         document.getElementById('stat-completed-lessons').textContent = completedLessons;
@@ -162,33 +171,80 @@ class SkillLvlUpApp {
     renderDeadlines() {
         const container = document.getElementById('dashboard-deadlines');
         const now = new Date();
+        
         const deadlines = this.courses
             .filter(c => c.status === 'active')
-            .map(course => ({ course, endDate: new Date(course.endDate), diffDays: Math.ceil((new Date(course.endDate) - now) / (1000 * 60 * 60 * 24)) }))
-            .filter(d => d.diffDays <= 14)
+            .map(course => {
+                // ✅ Поддержка обоих форматов дат
+                const endDate = course.endDate || course.end_date;
+                if (!endDate) return null;
+                
+                const diffDays = Math.ceil((new Date(endDate) - now) / (1000 * 60 * 60 * 24));
+                return { 
+                    course, 
+                    endDate: new Date(endDate), 
+                    diffDays 
+                };
+            })
+            .filter(d => d !== null && d.diffDays <= 14)  // ✅ Фильтр null
             .sort((a, b) => a.diffDays - b.diffDays)
             .slice(0, 5);
 
         if (deadlines.length === 0) {
-            container.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle"></i><p>Нет дедлайнов</p></div>`;
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-check-circle"></i>
+                    <p>Нет дедлайнов</p>
+                </div>`;
             return;
         }
 
         container.innerHTML = deadlines.map(d => {
             const urgencyClass = d.diffDays <= 3 ? 'urgent' : d.diffDays <= 7 ? 'soon' : 'normal';
             const daysText = d.diffDays === 0 ? 'Сегодня!' : `${d.diffDays} дн.`;
-            return `<div class="deadline-item ${urgencyClass}" onclick="app.openCourseDetail(${d.course.id})"><div class="deadline-icon"><i class="fas fa-flag"></i></div><div class="deadline-info"><div class="deadline-course">${d.course.title}</div><div class="deadline-date">${d.endDate.toLocaleDateString('ru-RU')}</div></div><span class="deadline-days">${daysText}</span></div>`;
+            return `
+                <div class="deadline-item ${urgencyClass}" onclick="app.openCourseDetail(${d.course.id})">
+                    <div class="deadline-icon">
+                        <i class="fas fa-flag"></i>
+                    </div>
+                    <div class="deadline-info">
+                        <div class="deadline-course">${d.course.title}</div>
+                        <div class="deadline-date">${d.endDate.toLocaleDateString('ru-RU')}</div>
+                    </div>
+                    <span class="deadline-days">${daysText}</span>
+                </div>`;
         }).join('');
     }
 
     getEventsForDate(dateKey) {
         const events = [];
+        
         this.courses.forEach(course => {
-            if (course.endDate === dateKey) events.push({ type: 'deadline', title: `📅 ${course.title}`, course });
-            course.lessons.forEach(lesson => {
-                if (lesson.date === dateKey) events.push({ type: 'lesson', title: `📚 ${lesson.title}`, course, lesson });
+            // ✅ Дедлайн курса (поддержка обоих форматов)
+            const endDate = course.endDate || course.end_date;
+            if (endDate === dateKey) {
+                events.push({ 
+                    type: 'deadline', 
+                    title: `📅 ${course.title}`, 
+                    course 
+                });
+            }
+            
+            // ✅ Уроки (поддержка обоих форматов дат)
+            const lessons = course.lessons || [];
+            lessons.forEach(lesson => {
+                const lessonDate = lesson.lesson_date || lesson.date;  // ✅ ПРОВЕРКА ОБОИХ ФОРМАТОВ
+                if (lessonDate === dateKey) {
+                    events.push({ 
+                        type: 'lesson', 
+                        title: `📚 ${lesson.title}`, 
+                        course, 
+                        lesson 
+                    });
+                }
             });
         });
+        
         return events;
     }
 
@@ -201,9 +257,33 @@ class SkillLvlUpApp {
 
         container.innerHTML = courses.map(course => {
             const progress = this.getCourseProgress(course);
-            const endDate = new Date(course.endDate).toLocaleDateString('ru-RU');
-            const startDate = new Date(course.startDate).toLocaleDateString('ru-RU');
-            return `<div class="course-card" data-course-id="${course.id}"><div class="course-card-actions"><button class="course-action-btn edit" onclick="app.editCourse(event, ${course.id})"><i class="fas fa-edit"></i></button><button class="course-action-btn delete" onclick="app.deleteCourse(event, ${course.id})"><i class="fas fa-trash"></i></button></div><div class="course-header"><h3>${course.title}</h3></div><div class="course-body"><p class="course-desc">${course.description || 'Нет описания'}</p><p class="course-meta"><i class="fas fa-calendar"></i> ${startDate} - ${endDate}</p><div class="progress-bar-bg"><div class="progress-bar-fill ${progress === 100 ? 'completed' : ''}" style="width: ${progress}%"></div></div><div class="progress-row"><span>${progress}%</span><span>${course.lessons.length} уроков</span></div></div></div>`;
+            const endDate = course.endDate || course.end_date;
+            const startDate = course.startDate || course.start_date;
+            const lessonsCount = (course.lessons || []).length;
+            
+            return `
+                <div class="course-card" data-course-id="${course.id}">
+                    <div class="course-card-actions">
+                        <button class="course-action-btn edit" onclick="app.editCourse(event, ${course.id})"><i class="fas fa-edit"></i></button>
+                        <button class="course-action-btn delete" onclick="app.deleteCourse(event, ${course.id})"><i class="fas fa-trash"></i></button>
+                    </div>
+                    <div class="course-header">
+                        <h3>${course.title}</h3>
+                    </div>
+                    <div class="course-body">
+                        <p class="course-desc">${course.description || 'Нет описания'}</p>
+                        <p class="course-meta">
+                            <i class="fas fa-calendar"></i> ${startDate ? new Date(startDate).toLocaleDateString('ru-RU') : 'Не указана'} - ${endDate ? new Date(endDate).toLocaleDateString('ru-RU') : 'Не указана'}
+                        </p>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill ${progress === 100 ? 'completed' : ''}" style="width: ${progress}%"></div>
+                        </div>
+                        <div class="progress-row">
+                            <span>${progress}%</span>
+                            <span>${lessonsCount} уроков</span>
+                        </div>
+                    </div>
+                </div>`;
         }).join('');
 
         container.querySelectorAll('.course-card').forEach(card => {
@@ -215,8 +295,10 @@ class SkillLvlUpApp {
     }
 
     getCourseProgress(course) {
-        if (!course.lessons?.length) return 0;
-        return Math.round((course.lessons.filter(l => l.completed).length / course.lessons.length) * 100);
+        if (!course || !course.lessons || !Array.isArray(course.lessons)) return 0;
+        if (course.lessons.length === 0) return 0;
+        const completed = course.lessons.filter(l => l.completed).length;
+        return Math.round((completed / course.lessons.length) * 100);
     }
 
     renderCoursesPage() {
@@ -245,43 +327,100 @@ class SkillLvlUpApp {
         }
     }
 
-    openCourseDetail(courseId) {
-        this.activeCourse = this.courses.find(c => c.id === courseId);
-        if (!this.activeCourse) return;
+    async openCourseDetail(courseId) {
+        try {
+            // ✅ Загружаем полную информацию о курсе с уроками через API
+            await this.loadCourseDetail(courseId);
+            
+            if (!this.activeCourse) return;
 
-        document.getElementById('course-detail-page').style.display = 'block';
-        document.querySelectorAll('.page-content').forEach(c => { if (c.id !== 'course-detail-page') c.style.display = 'none'; });
+            document.getElementById('course-detail-page').style.display = 'block';
+            document.querySelectorAll('.page-content').forEach(c => { 
+                if (c.id !== 'course-detail-page') c.style.display = 'none'; 
+            });
 
-        document.getElementById('detail-course-title').textContent = this.activeCourse.title;
-        document.getElementById('detail-course-description').textContent = this.activeCourse.description || 'Нет описания';
-        const progress = this.getCourseProgress(this.activeCourse);
-        document.getElementById('detail-course-progress').textContent = `${progress}%`;
-        document.getElementById('detail-progress-bar').style.width = `${progress}%`;
-        document.getElementById('detail-course-deadline').textContent = new Date(this.activeCourse.endDate).toLocaleDateString('ru-RU');
-        document.getElementById('detail-course-start').textContent = new Date(this.activeCourse.startDate).toLocaleDateString('ru-RU');
-        document.getElementById('lessons-count').textContent = `${this.activeCourse.lessons.length} уроков`;
+            document.getElementById('detail-course-title').textContent = this.activeCourse.title;
+            document.getElementById('detail-course-description').textContent = this.activeCourse.description || 'Нет описания';
+            
+            const progress = this.getCourseProgress(this.activeCourse);
+            document.getElementById('detail-course-progress').textContent = `${progress}%`;
+            document.getElementById('detail-progress-bar').style.width = `${progress}%`;
+            
+            // ✅ Обработка дат (snake_case и camelCase)
+            const startDate = this.activeCourse.startDate || this.activeCourse.start_date;
+            const endDate = this.activeCourse.endDate || this.activeCourse.end_date;
+            
+            document.getElementById('detail-course-deadline').textContent = endDate ? 
+                new Date(endDate).toLocaleDateString('ru-RU') : 'Не указана';
+            document.getElementById('detail-course-start').textContent = startDate ? 
+                new Date(startDate).toLocaleDateString('ru-RU') : 'Не указана';
+            
+            const lessonsCount = (this.activeCourse.lessons || []).length;
+            document.getElementById('lessons-count').textContent = `${lessonsCount} уроков`;
 
-        this.renderLessonList();
-        document.getElementById('page-title').textContent = this.activeCourse.title;
-        document.getElementById('page-subtitle').textContent = 'Детали курса';
+            this.renderLessonList();
+            document.getElementById('page-title').textContent = this.activeCourse.title;
+            document.getElementById('page-subtitle').textContent = 'Детали курса';
+        } catch (error) {
+            console.error('Error opening course:', error);
+            this.showToast('Ошибка загрузки курса', 'error');
+        }
     }
 
     renderLessonList() {
         const container = document.getElementById('lesson-list');
-        if (!this.activeCourse?.lessons?.length) {
-            container.innerHTML = `<div class="empty-state"><i class="fas fa-video"></i><h3>Нет уроков</h3></div>`;
+        const lessons = this.activeCourse?.lessons || [];
+        
+        if (!lessons.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-video"></i>
+                    <h3>Нет уроков</h3>
+                    <button class="btn btn-primary" onclick="app.openLessonModal()">
+                        <i class="fas fa-plus"></i> Добавить урок
+                    </button>
+                </div>`;
             return;
         }
 
-        container.innerHTML = this.activeCourse.lessons.map((lesson, index) => {
+        container.innerHTML = lessons.map((lesson, index) => {
             const filesCount = lesson.files?.length || 0;
             const hasNotes = !!lesson.notes;
-            const materials = filesCount || hasNotes ? `<span class="lesson-files-indicator" onclick="app.openLessonFiles(event, ${lesson.id})"><i class="fas fa-paperclip"></i> ${filesCount + (hasNotes ? 1 : 0)}</span>` : '';
-            return `<div class="lesson-item" data-lesson-id="${lesson.id}"><input type="checkbox" ${lesson.completed ? 'checked' : ''} data-lesson-id="${lesson.id}" class="lesson-checkbox"><span class="lesson-number">${index + 1}.</span><div class="lesson-info"><span class="lesson-title ${lesson.completed ? 'completed' : ''}">${lesson.title}</span>${lesson.description ? `<p class="lesson-description">${lesson.description}</p>` : ''}${lesson.date ? `<span class="lesson-date"><i class="fas fa-calendar"></i> ${new Date(lesson.date).toLocaleDateString('ru-RU')}</span>` : ''}${materials}</div><span class="lesson-duration">${lesson.duration} мин.</span><button class="btn btn-sm btn-secondary lesson-btn" onclick="app.openLessonFiles(event, ${lesson.id})"><i class="fas fa-folder-open"></i></button><button class="btn btn-sm btn-secondary lesson-btn" onclick="app.editLesson(event, ${lesson.id})"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-danger lesson-btn" onclick="app.deleteLesson(event, ${lesson.id})"><i class="fas fa-trash"></i></button></div>`;
+            const materials = filesCount || hasNotes ? 
+                `<span class="lesson-files-indicator" onclick="app.openLessonFiles(event, ${lesson.id})">
+                    <i class="fas fa-paperclip"></i> ${filesCount + (hasNotes ? 1 : 0)}
+                </span>` : '';
+            
+            return `
+                <div class="lesson-item" data-lesson-id="${lesson.id}">
+                    <input type="checkbox" ${lesson.completed ? 'checked' : ''} 
+                        data-lesson-id="${lesson.id}" class="lesson-checkbox">
+                    <span class="lesson-number">${index + 1}.</span>
+                    <div class="lesson-info">
+                        <span class="lesson-title ${lesson.completed ? 'completed' : ''}">${lesson.title}</span>
+                        ${lesson.description ? `<p class="lesson-description">${lesson.description}</p>` : ''}
+                        ${lesson.lesson_date || lesson.date ? 
+                            `<span class="lesson-date"><i class="fas fa-calendar"></i> ${new Date(lesson.lesson_date || lesson.date).toLocaleDateString('ru-RU')}</span>` 
+                            : ''}
+                        ${materials}
+                    </div>
+                    <span class="lesson-duration">${lesson.duration} мин.</span>
+                    <button class="btn btn-sm btn-secondary lesson-btn" onclick="app.openLessonFiles(event, ${lesson.id})">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
+                    <button class="btn btn-sm btn-secondary lesson-btn" onclick="app.editLesson(event, ${lesson.id})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger lesson-btn" onclick="app.deleteLesson(event, ${lesson.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>`;
         }).join('');
 
         container.querySelectorAll('.lesson-checkbox').forEach(cb => {
-            cb.addEventListener('change', (e) => this.toggleLessonCompletion(parseInt(e.target.dataset.lessonId)));
+            cb.addEventListener('change', (e) => {
+                this.toggleLessonCompletion(parseInt(e.target.dataset.lessonId));
+            });
         });
     }
 
@@ -291,14 +430,46 @@ class SkillLvlUpApp {
         if (lesson) this.filesManager.open(this.activeCourse, lesson);
     }
 
-    toggleLessonCompletion(lessonId) {
-        const lesson = this.activeCourse.lessons.find(l => l.id === lessonId);
-        if (lesson) {
-            lesson.completed = !lesson.completed;
-            this.saveToStorage();
+    async toggleLessonCompletion(lessonId) {
+        try {
+            await this.api.toggleLessonComplete(lessonId);
+            await this.loadCourseDetail(this.activeCourse.id);
             this.renderLessonList();
             this.renderDashboard();
+            const lesson = this.activeCourse.lessons.find(l => l.id === lessonId);
             this.showToast(lesson.completed ? 'Урок пройден!' : 'Прогресс сброшен', lesson.completed ? 'success' : 'info');
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
+    }
+
+    async loadCourseDetail(courseId) {
+        try {
+            const response = await this.api.getCourse(courseId);
+            this.activeCourse = response.course;
+            
+            // ✅ Конвертируем snake_case в camelCase для совместимости
+            if (this.activeCourse) {
+                if (this.activeCourse.start_date && !this.activeCourse.startDate) {
+                    this.activeCourse.startDate = this.activeCourse.start_date;
+                }
+                if (this.activeCourse.end_date && !this.activeCourse.endDate) {
+                    this.activeCourse.endDate = this.activeCourse.end_date;
+                }
+                if (!this.activeCourse.lessons) {
+                    this.activeCourse.lessons = [];
+                }
+                
+                // ✅ Конвертируем даты уроков
+                this.activeCourse.lessons.forEach(lesson => {
+                    if (lesson.lesson_date && !lesson.date) {
+                        lesson.date = lesson.lesson_date;
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load course detail:', error);
+            this.showToast('Ошибка загрузки курса', 'error');
         }
     }
 
@@ -337,23 +508,22 @@ class SkillLvlUpApp {
         this.editingCourseId = null;
     }
 
-    saveCourse(title, description, startDate, endDate) {
-        if (this.editingCourseId) {
-            const course = this.courses.find(c => c.id === this.editingCourseId);
-            if (course) {
-                Object.assign(course, { title, description, startDate, endDate });
-                this.saveToStorage();
-                this.showToast('Курс обновлен!', 'success');
-                if (this.activeCourse?.id === this.editingCourseId) this.openCourseDetail(this.editingCourseId);
+    async saveCourse(title, description, startDate, endDate) {
+        try {
+            if (this.editingCourseId) {
+                await this.api.updateCourse(this.editingCourseId, { title, description, start_date: startDate, end_date: endDate });
+                this.showToast('Курс успешно обновлен!', 'success');
+            } else {
+                await this.api.createCourse({ title, description, start_date: startDate, end_date: endDate });
+                this.showToast('Курс успешно создан!', 'success');
             }
-        } else {
-            this.courses.push({ id: Date.now(), title, description, startDate, endDate, lessons: [], status: 'active' });
-            this.saveToStorage();
-            this.showToast('Курс создан!', 'success');
+            await this.loadCourses();
+            this.closeCourseModal();
+            this.renderDashboard();
+            this.renderCoursesPage();
+        } catch (error) {
+            this.showToast(error.message, 'error');
         }
-        this.closeCourseModal();
-        this.renderDashboard();
-        this.renderCoursesPage();
     }
 
     editCourse(event, courseId) {
@@ -371,16 +541,20 @@ class SkillLvlUpApp {
         }
     }
 
-    confirmDeleteCourse() {
+    async confirmDeleteCourse() {
         if (this.courseToDelete) {
-            this.courses = this.courses.filter(c => c.id !== this.courseToDelete);
-            this.saveToStorage();
-            this.showToast('Курс удален!', 'success');
-            this.closeDeleteModal();
-            this.renderDashboard();
-            this.renderCoursesPage();
-            if (this.activeCourse?.id === this.courseToDelete) this.closeCourseDetail();
-            this.courseToDelete = null;
+            try {
+                await this.api.deleteCourse(this.courseToDelete);
+                this.showToast('Курс успешно удален!', 'success');
+                await this.loadCourses();
+                this.closeDeleteModal();
+                this.renderDashboard();
+                this.renderCoursesPage();
+                if (this.activeCourse?.id === this.courseToDelete) this.closeCourseDetail();
+                this.courseToDelete = null;
+            } catch (error) {
+                this.showToast(error.message, 'error');
+            }
         }
     }
 
@@ -417,20 +591,30 @@ class SkillLvlUpApp {
         this.editingLessonId = null;
     }
 
-    saveLesson(title, duration, date, description) {
+    async saveLesson(title, duration, date, description) {
         if (!this.activeCourse) return;
-        if (this.editingLessonId) {
-            const lesson = this.activeCourse.lessons.find(l => l.id === this.editingLessonId);
-            if (lesson) Object.assign(lesson, { title, duration: parseInt(duration), date, description });
-            this.showToast('Урок обновлен!', 'success');
-        } else {
-            this.activeCourse.lessons.push({ id: Date.now(), title, duration: parseInt(duration), date, description, completed: false, notes: '', files: [] });
-            this.showToast('Урок добавлен!', 'success');
+        
+        try {
+            if (this.editingLessonId) {
+                await this.api.updateLesson(this.editingLessonId, {
+                    title, duration: parseInt(duration), lesson_date: date, description
+                });
+                this.showToast('Урок успешно обновлен!', 'success');
+            } else {
+                await this.api.createLesson(this.activeCourse.id, {
+                    title, duration: parseInt(duration), lesson_date: date, description
+                });
+                this.showToast('Урок успешно добавлен!', 'success');
+            }
+            
+            // ✅ ИСПРАВЛЕНИЕ: Полная перезагрузка курса с уроками
+            await this.loadCourseDetail(this.activeCourse.id);
+            this.closeLessonModal();
+            this.renderLessonList();  // ✅ Явный вызов рендера
+            this.renderDashboard();
+        } catch (error) {
+            this.showToast(error.message, 'error');
         }
-        this.saveToStorage();
-        this.closeLessonModal();
-        this.renderLessonList();
-        this.renderDashboard();
     }
 
     editLesson(event, lessonId) {
@@ -443,8 +627,6 @@ class SkillLvlUpApp {
         if (!this.activeCourse) return;
         if (confirm('Удалить урок?')) {
             this.activeCourse.lessons = this.activeCourse.lessons.filter(l => l.id !== lessonId);
-            this.saveToStorage();
-            this.showToast('Урок удален!', 'success');
             this.renderLessonList();
             this.renderDashboard();
         }
@@ -458,8 +640,9 @@ class SkillLvlUpApp {
         }
         tbody.innerHTML = this.courses.map(course => {
             const progress = this.getCourseProgress(course);
+            const lessonsCount = (course.lessons || []).length;
             const [badgeClass, status] = progress === 100 ? ['badge-success', 'Завершен'] : new Date(course.endDate) < new Date() ? ['badge-danger', 'Просрочен'] : ['badge-info', 'В процессе'];
-            return `<tr><td>${course.title}</td><td>${course.lessons.length}</td><td><div class="progress-bar-bg" style="width: 100px; display: inline-block; vertical-align: middle; margin-right: 10px;"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>${progress}%</td><td><span class="badge ${badgeClass}">${status}</span></td></tr>`;
+            return `<tr><td>${course.title}</td><td>${lessonsCount}</td><td><div class="progress-bar-bg" style="width: 100px; display: inline-block; vertical-align: middle; margin-right: 10px;"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>${progress}%</td><td><span class="badge ${badgeClass}">${status}</span></td></tr>`;
         }).join('');
     }
 
@@ -469,40 +652,140 @@ class SkillLvlUpApp {
         const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle';
         toast.innerHTML = `<i class="fas fa-${icon}"></i><span>${message}</span>`;
         document.body.appendChild(toast);
-        setTimeout(() => { toast.style.animation = 'slideInRight 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, 3000);
+        setTimeout(() => { 
+            toast.style.animation = 'slideInRight 0.3s ease reverse'; 
+            setTimeout(() => toast.remove(), 300); 
+        }, 3000);
+    }
+
+    initModules() {
+        this.calendar = new CalendarManager(this);
+        this.calendar.init('calendar-widget');
+        this.filesManager = new FilesManager(this);
+        this.filesManager.init();
+    }
+
+    getDateOffset(days) {
+        const date = new Date();
+        date.setDate(date.getDate() + days);
+        return date.toISOString().split('T')[0];
+    }
+
+    getTodayDate() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    showAuth() {
+        document.getElementById('auth-container').style.display = 'flex';
+        document.getElementById('app-layout').style.display = 'none';
+    }
+
+    showApp() {
+        document.getElementById('auth-container').style.display = 'none';
+        document.getElementById('app-layout').style.display = 'flex';
+        this.updateUserInfo();
+        this.navigateTo('dashboard');
     }
 
     bindEvents() {
         const $ = (id) => document.getElementById(id);
         const $$ = (sel) => document.querySelectorAll(sel);
 
-        $('show-register')?.addEventListener('click', (e) => { e.preventDefault(); $('login-form').style.display = 'none'; $('register-form').style.display = 'block'; });
-        $('show-login')?.addEventListener('click', (e) => { e.preventDefault(); $('login-form').style.display = 'block'; $('register-form').style.display = 'none'; });
-        $('login-form-element')?.addEventListener('submit', (e) => { e.preventDefault(); this.login($('login-email').value); });
-        $('register-form-element')?.addEventListener('submit', (e) => { e.preventDefault(); this.register($('register-name').value, $('register-email').value); });
+        $('show-register')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            $('login-form').style.display = 'none';
+            $('register-form').style.display = 'block';
+        });
+
+        $('show-login')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            $('login-form').style.display = 'block';
+            $('register-form').style.display = 'none';
+        });
+
+        $('login-form-element')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.login($('login-email').value, $('login-password').value);
+        });
+
+        $('register-form-element')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.register($('register-name').value, $('register-email').value, $('register-password').value);
+        });
+
         $('logout-btn')?.addEventListener('click', () => this.logout());
+
         $$('.nav-item').forEach(item => item.addEventListener('click', () => this.navigateTo(item.dataset.page)));
+
         $('new-course-btn')?.addEventListener('click', () => this.openCourseModal());
         $('cancel-course')?.addEventListener('click', () => this.closeCourseModal());
-        $('new-course-form')?.addEventListener('submit', (e) => { e.preventDefault(); this.saveCourse($('course-title').value, $('course-description').value, $('course-start-date').value, $('course-end-date').value); });
-        $('course-modal')?.addEventListener('click', (e) => { if (e.target.id === 'course-modal') this.closeCourseModal(); });
+        $('new-course-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveCourse($('course-title').value, $('course-description').value, $('course-start-date').value, $('course-end-date').value);
+        });
+        $('course-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'course-modal') this.closeCourseModal();
+        });
+
         $('cancel-lesson')?.addEventListener('click', () => this.closeLessonModal());
-        $('new-lesson-form')?.addEventListener('submit', (e) => { e.preventDefault(); this.saveLesson($('lesson-title').value, $('lesson-duration').value, $('lesson-date').value, $('lesson-description').value); });
-        $('lesson-modal')?.addEventListener('click', (e) => { if (e.target.id === 'lesson-modal') this.closeLessonModal(); });
+        $('new-lesson-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveLesson($('lesson-title').value, $('lesson-duration').value, $('lesson-date').value, $('lesson-description').value);
+        });
+        $('lesson-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'lesson-modal') this.closeLessonModal();
+        });
+
         $('cancel-delete')?.addEventListener('click', () => this.closeDeleteModal());
         $('confirm-delete')?.addEventListener('click', () => this.confirmDeleteCourse());
-        $('delete-modal')?.addEventListener('click', (e) => { if (e.target.id === 'delete-modal') this.closeDeleteModal(); });
+        $('delete-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'delete-modal') this.closeDeleteModal();
+        });
+
         $('back-to-courses')?.addEventListener('click', () => this.closeCourseDetail());
-        $('edit-course-btn')?.addEventListener('click', () => { if (this.activeCourse) this.openCourseModal(this.activeCourse.id); });
-        $('delete-course-btn')?.addEventListener('click', () => { if (this.activeCourse) { $('delete-course-name').textContent = this.activeCourse.title; $('delete-modal').style.display = 'flex'; this.courseToDelete = this.activeCourse.id; } });
+        $('edit-course-btn')?.addEventListener('click', () => {
+            if (this.activeCourse) this.openCourseModal(this.activeCourse.id);
+        });
+        $('delete-course-btn')?.addEventListener('click', () => {
+            if (this.activeCourse) {
+                $('delete-course-name').textContent = this.activeCourse.title;
+                $('delete-modal').style.display = 'flex';
+                this.courseToDelete = this.activeCourse.id;
+            }
+        });
         $('add-lesson-btn')?.addEventListener('click', () => this.openLessonModal());
-        $('course-search')?.addEventListener('input', () => { if (this.currentPage === 'courses') this.renderCoursesPage(); });
-        $('course-filter')?.addEventListener('change', () => { if (this.currentPage === 'courses') this.renderCoursesPage(); });
-        $('course-sort')?.addEventListener('change', () => { if (this.currentPage === 'courses') this.renderCoursesPage(); });
-        $('profile-form')?.addEventListener('submit', (e) => { e.preventDefault(); this.currentUser.name = $('profile-name').value; this.currentUser.email = $('profile-email').value; this.currentUser.initials = this.getInitials(this.currentUser.name); this.saveToStorage(); this.updateUserInfo(); this.showToast('Профиль обновлен!', 'success'); });
+
+        $('course-search')?.addEventListener('input', () => {
+            if (this.currentPage === 'courses') this.renderCoursesPage();
+        });
+        $('course-filter')?.addEventListener('change', () => {
+            if (this.currentPage === 'courses') this.renderCoursesPage();
+        });
+        $('course-sort')?.addEventListener('change', () => {
+            if (this.currentPage === 'courses') this.renderCoursesPage();
+        });
+
+        $('profile-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = $('profile-name').value;
+            const email = $('profile-email').value;
+            try {
+                await this.api.updateProfile(name, email);
+                this.currentUser.name = name;
+                this.currentUser.email = email;
+                this.currentUser.initials = this.getInitials(name);
+                this.updateUserInfo();
+                this.showToast('Профиль обновлён!', 'success');
+            } catch (error) {
+                this.showToast(error.message, 'error');
+            }
+        });
+
         $('export-pdf')?.addEventListener('click', () => this.showToast('PDF в полной версии', 'info'));
         $('export-excel')?.addEventListener('click', () => this.showToast('Excel в полной версии', 'info'));
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => { window.app = new SkillLvlUpApp(); });
+document.addEventListener('DOMContentLoaded', () => { 
+    window.app = new SkillLvlUpApp(); 
+});

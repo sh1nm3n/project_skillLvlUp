@@ -83,7 +83,7 @@ class CalendarManager {
 
             html += `
                 <div class="cal-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" 
-                     data-date="${dateKey}">
+                    data-date="${dateKey}">
                     <span class="cal-day-number">${day}</span>
                     ${hasEvents ? '<span class="cal-event-dot"></span>' : ''}
                 </div>

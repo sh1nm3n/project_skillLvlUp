@@ -146,11 +146,12 @@ exports.toggleComplete = async (req, res) => {
             return res.status(403).json({ error: 'Доступ запрещен' });
         }
 
-        const updated = await Lesson.toggleComplete(id);
+        const courseProgress = await Course.getProgress(course.id);
 
         res.json({
             message: updated.completed ? 'Урок пройден!' : 'Прогресс сброшен',
-            lesson: updated
+            lesson: updated,
+            courseProgress: courseProgress  // ✅ Отправляем прогресс курса
         });
     } catch (error) {
         console.error('Ошибка обновления статуса:', error);
@@ -186,7 +187,7 @@ exports.deleteLesson = async (req, res) => {
 exports.uploadFile = async (req, res) => {
     try {
         const { lessonId } = req.params;
-
+        
         if (!req.file) {
             return res.status(400).json({ error: 'Файл не загружен' });
         }

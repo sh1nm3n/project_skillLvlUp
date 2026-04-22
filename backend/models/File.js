@@ -30,11 +30,11 @@ class File {
     static async delete(id) {
         const file = await this.findById(id);
         if (file) {
-            // Удаляем физический файл
-            const fullPath = path.join(__dirname, '..', file.path);
-            if (fs.existsSync(fullPath)) {
-                fs.unlinkSync(fullPath);
-            }
+                // Удаляем физический файл
+                const fullPath = path.join(__dirname, '..', file.path);
+                if (fs.existsSync(fullPath)) {
+                    fs.unlinkSync(fullPath);
+                }
             
             const sql = 'DELETE FROM files WHERE id = ?';
             await query(sql, [id]);

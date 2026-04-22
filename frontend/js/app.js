@@ -1,4 +1,4 @@
-// app.js - Исправленная версия
+// app.js - Исправленная версия с календарём
 class SkillLvlUpApp {
     constructor() {
         this.currentUser = null;
@@ -10,6 +10,7 @@ class SkillLvlUpApp {
         this.courseToDelete = null;
         this.calendar = null;
         this.filesManager = null;
+        this.exportManager = null;
         this.api = new ApiService('http://localhost:3000/api');
         this.init();
     }
@@ -39,8 +40,6 @@ class SkillLvlUpApp {
         try {
             const response = await this.api.getCourses();
             this.courses = response.courses || [];
-            
-            // ✅ Конвертируем даты для календаря
             this.courses.forEach(course => {
                 if (course.start_date && !course.startDate) {
                     course.startDate = course.start_date;
@@ -60,6 +59,115 @@ class SkillLvlUpApp {
             console.error('Failed to load courses:', error);
             this.courses = [];
         }
+    }
+
+    async refreshAllData() {
+        try {
+            await this.loadCourses();
+            this.renderDashboard();
+            
+            if (this.currentPage === 'courses') {
+                this.renderCoursesPage();
+            }
+            
+            if (this.currentPage === 'reports') {
+                this.renderReports();
+                this.renderCharts();
+            }
+            
+            if (this.calendar) {
+                this.calendar.refresh();
+            }
+            
+            if (this.activeCourse) {
+                await this.loadCourseDetail(this.activeCourse.id);
+                this.renderLessonList();
+            }
+        } catch (error) {
+            console.error('Ошибка обновления данных:', error);
+        }
+    }
+
+    // ✅ МЕТОД ДЛЯ ПОЛУЧЕНИЯ СОБЫТИЙ НА ДАТУ (для календаря)
+    getEventsForDate(dateKey) {
+        const events = [];
+        const now = new Date();
+        
+        this.courses.forEach(course => {
+            // ✅ Дедлайн курса (дата окончания) - БЕЗ ПРОВЕРКИ STATUS
+            const endDate = course.endDate || course.end_date;
+            if (endDate) {
+                const endDateFormatted = new Date(endDate).toISOString().split('T')[0];
+                // ✅ Убрали проверку course.status === 'active'
+                if (endDateFormatted === dateKey) {
+                    events.push({ 
+                        type: 'deadline', 
+                        title: `📅 Дедлайн: ${course.title}`, 
+                        course,
+                        description: 'Дата окончания курса'
+                    });
+                }
+            }
+            
+            // ✅ Уроки курса
+            const lessons = course.lessons || [];
+            lessons.forEach(lesson => {
+                const lessonDate = lesson.lesson_date || lesson.date;
+                if (lessonDate) {
+                    const lessonDateFormatted = new Date(lessonDate).toISOString().split('T')[0];
+                    if (lessonDateFormatted === dateKey) {
+                        events.push({ 
+                            type: 'lesson', 
+                            title: `📚 ${lesson.title}`, 
+                            course, 
+                            lesson,
+                            description: `Урок из курса "${course.title}"`,
+                            completed: lesson.completed || false
+                        });
+                    }
+                }
+            });
+        });
+        
+        return events;
+    }
+
+    // ✅ МЕТОД ДЛЯ ПОЛУЧЕНИЯ ВСЕХ СОБЫТИЙ ДЛЯ КАЛЕНДАРЯ
+    getAllCalendarEvents() {
+        const events = [];
+        
+        this.courses.forEach(course => {
+            // Дедлайн курса - БЕЗ ПРОВЕРКИ STATUS
+            const endDate = course.endDate || course.end_date;
+            if (endDate) {
+                const endDateFormatted = new Date(endDate).toISOString().split('T')[0];
+                events.push({
+                    date: endDateFormatted,
+                    type: 'deadline',
+                    title: `Дедлайн: ${course.title}`,
+                    course
+                });
+            }
+            
+            // Уроки
+            const lessons = course.lessons || [];
+            lessons.forEach(lesson => {
+                const lessonDate = lesson.lesson_date || lesson.date;
+                if (lessonDate) {
+                    const lessonDateFormatted = new Date(lessonDate).toISOString().split('T')[0];
+                    events.push({
+                        date: lessonDateFormatted,
+                        type: 'lesson',
+                        title: lesson.title,
+                        course,
+                        lesson,
+                        completed: lesson.completed || false
+                    });
+                }
+            });
+        });
+        
+        return events;
     }
 
     async register(name, email, password) {
@@ -102,7 +210,7 @@ class SkillLvlUpApp {
         if (!this.currentUser) return;
         const { name, email, initials } = this.currentUser;
         document.getElementById('user-name').textContent = name;
-        document.getElementById('user-avatar').textContent = initials;
+        document.getElementById('user-avatar').textContent = initials || this.getInitials(name);
         document.getElementById('profile-name').value = name;
         document.getElementById('profile-email').value = email;
     }
@@ -117,6 +225,12 @@ class SkillLvlUpApp {
         if (pageElement) pageElement.style.display = 'block';
         this.updatePageHeader(page);
         this.renderPage(page);
+
+        if (page === 'reports') {
+            setTimeout(() => {
+                this.renderCharts();
+            }, 200);
+        }
     }
 
     updatePageHeader(page) {
@@ -132,7 +246,11 @@ class SkillLvlUpApp {
     }
 
     renderPage(page) {
-        const methods = { dashboard: 'renderDashboard', courses: 'renderCoursesPage', reports: 'renderReports' };
+        const methods = { 
+            dashboard: 'renderDashboard', 
+            courses: 'renderCoursesPage', 
+            reports: 'renderReports' 
+        };
         if (methods[page]) this[methods[page]]();
     }
 
@@ -152,10 +270,10 @@ class SkillLvlUpApp {
         const totalFiles = this.courses.reduce((acc, c) => 
             acc + (c.lessons || []).reduce((lAcc, l) => lAcc + (l.files?.length || 0) + (l.notes ? 1 : 0), 0), 0);
 
-        document.getElementById('stat-active-courses').textContent = activeCourses;
-        document.getElementById('stat-completed-lessons').textContent = completedLessons;
-        document.getElementById('stat-upcoming-deadlines').textContent = upcomingDeadlines;
-        document.getElementById('stat-total-files').textContent = totalFiles;
+        this.animateStatUpdate('stat-active-courses', activeCourses);
+        this.animateStatUpdate('stat-completed-lessons', completedLessons);
+        this.animateStatUpdate('stat-upcoming-deadlines', upcomingDeadlines);
+        this.animateStatUpdate('stat-total-files', totalFiles);
 
         const courseList = document.getElementById('dashboard-course-list');
         if (this.courses.length === 0) {
@@ -168,6 +286,22 @@ class SkillLvlUpApp {
         if (this.calendar) this.calendar.refresh();
     }
 
+    animateStatUpdate(elementId, newValue) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        
+        const oldValue = parseInt(element.textContent) || 0;
+        
+        if (oldValue !== newValue) {
+            element.classList.add('updated');
+            element.textContent = newValue;
+            
+            setTimeout(() => {
+                element.classList.remove('updated');
+            }, 400);
+        }
+    }
+
     renderDeadlines() {
         const container = document.getElementById('dashboard-deadlines');
         const now = new Date();
@@ -175,7 +309,6 @@ class SkillLvlUpApp {
         const deadlines = this.courses
             .filter(c => c.status === 'active')
             .map(course => {
-                // ✅ Поддержка обоих форматов дат
                 const endDate = course.endDate || course.end_date;
                 if (!endDate) return null;
                 
@@ -186,16 +319,12 @@ class SkillLvlUpApp {
                     diffDays 
                 };
             })
-            .filter(d => d !== null && d.diffDays <= 14)  // ✅ Фильтр null
+            .filter(d => d !== null && d.diffDays <= 14)
             .sort((a, b) => a.diffDays - b.diffDays)
             .slice(0, 5);
 
         if (deadlines.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-check-circle"></i>
-                    <p>Нет дедлайнов</p>
-                </div>`;
+            container.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle"></i><p>Нет дедлайнов</p></div>`;
             return;
         }
 
@@ -216,38 +345,6 @@ class SkillLvlUpApp {
         }).join('');
     }
 
-    getEventsForDate(dateKey) {
-        const events = [];
-        
-        this.courses.forEach(course => {
-            // ✅ Дедлайн курса (поддержка обоих форматов)
-            const endDate = course.endDate || course.end_date;
-            if (endDate === dateKey) {
-                events.push({ 
-                    type: 'deadline', 
-                    title: `📅 ${course.title}`, 
-                    course 
-                });
-            }
-            
-            // ✅ Уроки (поддержка обоих форматов дат)
-            const lessons = course.lessons || [];
-            lessons.forEach(lesson => {
-                const lessonDate = lesson.lesson_date || lesson.date;  // ✅ ПРОВЕРКА ОБОИХ ФОРМАТОВ
-                if (lessonDate === dateKey) {
-                    events.push({ 
-                        type: 'lesson', 
-                        title: `📚 ${lesson.title}`, 
-                        course, 
-                        lesson 
-                    });
-                }
-            });
-        });
-        
-        return events;
-    }
-
     renderCourseList(courses, containerId) {
         const container = document.getElementById(containerId);
         if (courses.length === 0) {
@@ -264,8 +361,12 @@ class SkillLvlUpApp {
             return `
                 <div class="course-card" data-course-id="${course.id}">
                     <div class="course-card-actions">
-                        <button class="course-action-btn edit" onclick="app.editCourse(event, ${course.id})"><i class="fas fa-edit"></i></button>
-                        <button class="course-action-btn delete" onclick="app.deleteCourse(event, ${course.id})"><i class="fas fa-trash"></i></button>
+                        <button class="course-action-btn edit" onclick="app.editCourse(event, ${course.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="course-action-btn delete" onclick="app.deleteCourse(event, ${course.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
                     <div class="course-header">
                         <h3>${course.title}</h3>
@@ -273,7 +374,9 @@ class SkillLvlUpApp {
                     <div class="course-body">
                         <p class="course-desc">${course.description || 'Нет описания'}</p>
                         <p class="course-meta">
-                            <i class="fas fa-calendar"></i> ${startDate ? new Date(startDate).toLocaleDateString('ru-RU') : 'Не указана'} - ${endDate ? new Date(endDate).toLocaleDateString('ru-RU') : 'Не указана'}
+                            <i class="fas fa-calendar"></i> 
+                            ${startDate ? new Date(startDate).toLocaleDateString('ru-RU') : 'Не указана'} - 
+                            ${endDate ? new Date(endDate).toLocaleDateString('ru-RU') : 'Не указана'}
                         </p>
                         <div class="progress-bar-bg">
                             <div class="progress-bar-fill ${progress === 100 ? 'completed' : ''}" style="width: ${progress}%"></div>
@@ -307,15 +410,18 @@ class SkillLvlUpApp {
         const sort = document.getElementById('course-sort')?.value || 'name';
 
         let filtered = this.courses.filter(course => {
-            const matchSearch = course.title.toLowerCase().includes(searchTerm) || course.description?.toLowerCase().includes(searchTerm);
-            const matchFilter = filter === 'all' || (filter === 'active' && course.status === 'active') || (filter === 'completed' && this.getCourseProgress(course) === 100);
+            const matchSearch = course.title.toLowerCase().includes(searchTerm) || 
+                               course.description?.toLowerCase().includes(searchTerm);
+            const matchFilter = filter === 'all' || 
+                               (filter === 'active' && course.status === 'active') || 
+                               (filter === 'completed' && this.getCourseProgress(course) === 100);
             return matchSearch && matchFilter;
         });
 
         filtered.sort((a, b) => {
             if (sort === 'name') return a.title.localeCompare(b.title);
             if (sort === 'progress') return this.getCourseProgress(b) - this.getCourseProgress(a);
-            if (sort === 'deadline') return new Date(a.endDate) - new Date(b.endDate);
+            if (sort === 'deadline') return new Date(a.endDate || a.end_date) - new Date(b.endDate || b.end_date);
             return 0;
         });
 
@@ -329,7 +435,6 @@ class SkillLvlUpApp {
 
     async openCourseDetail(courseId) {
         try {
-            // ✅ Загружаем полную информацию о курсе с уроками через API
             await this.loadCourseDetail(courseId);
             
             if (!this.activeCourse) return;
@@ -346,7 +451,6 @@ class SkillLvlUpApp {
             document.getElementById('detail-course-progress').textContent = `${progress}%`;
             document.getElementById('detail-progress-bar').style.width = `${progress}%`;
             
-            // ✅ Обработка дат (snake_case и camelCase)
             const startDate = this.activeCourse.startDate || this.activeCourse.start_date;
             const endDate = this.activeCourse.endDate || this.activeCourse.end_date;
             
@@ -364,7 +468,7 @@ class SkillLvlUpApp {
         } catch (error) {
             console.error('Error opening course:', error);
             this.showToast('Ошибка загрузки курса', 'error');
-        }
+        } 
     }
 
     renderLessonList() {
@@ -374,11 +478,7 @@ class SkillLvlUpApp {
         if (!lessons.length) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <i class="fas fa-video"></i>
                     <h3>Нет уроков</h3>
-                    <button class="btn btn-primary" onclick="app.openLessonModal()">
-                        <i class="fas fa-plus"></i> Добавить урок
-                    </button>
                 </div>`;
             return;
         }
@@ -432,12 +532,34 @@ class SkillLvlUpApp {
 
     async toggleLessonCompletion(lessonId) {
         try {
-            await this.api.toggleLessonComplete(lessonId);
+            const response = await this.api.toggleLessonComplete(lessonId);
             await this.loadCourseDetail(this.activeCourse.id);
+            await this.loadCourses();
+            const newProgress = this.getCourseProgress(this.activeCourse);
+            this.animateProgressUpdate(this.activeCourse.id, newProgress);
             this.renderLessonList();
+            setTimeout(() => {
+                const lessonItem = document.querySelector(`[data-lesson-id="${lessonId}"]`);
+                if (lessonItem) {
+                    lessonItem.classList.add('status-changed');
+                    setTimeout(() => {
+                        lessonItem.classList.remove('status-changed');
+                    }, 400);
+                }
+            }, 100);
             this.renderDashboard();
-            const lesson = this.activeCourse.lessons.find(l => l.id === lessonId);
-            this.showToast(lesson.completed ? 'Урок пройден!' : 'Прогресс сброшен', lesson.completed ? 'success' : 'info');
+            if (this.currentPage === 'courses') {
+                this.renderCoursesPage();
+            }
+            const lesson = this.activeCourse?.lessons.find(l => l.id === lessonId);
+            this.showToast(
+                lesson?.completed ? 'Урок пройден!' : 'Прогресс сброшен', 
+                lesson?.completed ? 'success' : 'info'
+            );
+            this.refreshCharts();
+            if (this.calendar) {
+                this.calendar.refresh();
+            }
         } catch (error) {
             this.showToast(error.message, 'error');
         }
@@ -448,7 +570,6 @@ class SkillLvlUpApp {
             const response = await this.api.getCourse(courseId);
             this.activeCourse = response.course;
             
-            // ✅ Конвертируем snake_case в camelCase для совместимости
             if (this.activeCourse) {
                 if (this.activeCourse.start_date && !this.activeCourse.startDate) {
                     this.activeCourse.startDate = this.activeCourse.start_date;
@@ -460,7 +581,6 @@ class SkillLvlUpApp {
                     this.activeCourse.lessons = [];
                 }
                 
-                // ✅ Конвертируем даты уроков
                 this.activeCourse.lessons.forEach(lesson => {
                     if (lesson.lesson_date && !lesson.date) {
                         lesson.date = lesson.lesson_date;
@@ -492,8 +612,8 @@ class SkillLvlUpApp {
                 title.innerHTML = '<i class="fas fa-edit"></i> Редактировать';
                 document.getElementById('course-title').value = course.title;
                 document.getElementById('course-description').value = course.description || '';
-                document.getElementById('course-start-date').value = course.startDate;
-                document.getElementById('course-end-date').value = course.endDate;
+                document.getElementById('course-start-date').value = course.startDate || course.start_date;
+                document.getElementById('course-end-date').value = course.endDate || course.end_date;
             }
         } else {
             title.innerHTML = '<i class="fas fa-plus-circle"></i> Новый курс';
@@ -510,17 +630,31 @@ class SkillLvlUpApp {
 
     async saveCourse(title, description, startDate, endDate) {
         try {
+            // ✅ ИСПРАВЛЕНО: Проверяем обязательные поля
+            if (!title || !startDate || !endDate) {
+                this.showToast('Заполните все обязательные поля', 'error');
+                return;
+            }
+            
             if (this.editingCourseId) {
-                await this.api.updateCourse(this.editingCourseId, { title, description, start_date: startDate, end_date: endDate });
+                await this.api.updateCourse(this.editingCourseId, { 
+                    title: title.trim(),
+                    description: description ? description.trim() : '',
+                    start_date: startDate,
+                    end_date: endDate
+                });
                 this.showToast('Курс успешно обновлен!', 'success');
             } else {
-                await this.api.createCourse({ title, description, start_date: startDate, end_date: endDate });
+                await this.api.createCourse({ 
+                    title: title.trim(),
+                    description: description ? description.trim() : '',
+                    start_date: startDate,
+                    end_date: endDate
+                });
                 this.showToast('Курс успешно создан!', 'success');
             }
-            await this.loadCourses();
+            await this.refreshAllData();
             this.closeCourseModal();
-            this.renderDashboard();
-            this.renderCoursesPage();
         } catch (error) {
             this.showToast(error.message, 'error');
         }
@@ -542,21 +676,23 @@ class SkillLvlUpApp {
     }
 
     async confirmDeleteCourse() {
-        if (this.courseToDelete) {
-            try {
-                await this.api.deleteCourse(this.courseToDelete);
-                this.showToast('Курс успешно удален!', 'success');
-                await this.loadCourses();
-                this.closeDeleteModal();
-                this.renderDashboard();
-                this.renderCoursesPage();
-                if (this.activeCourse?.id === this.courseToDelete) this.closeCourseDetail();
-                this.courseToDelete = null;
-            } catch (error) {
-                this.showToast(error.message, 'error');
+    if (this.courseToDelete) {
+        try {
+            await this.api.deleteCourse(this.courseToDelete);
+            this.showToast('Курс успешно удален!', 'success');
+            await this.refreshAllData();
+            this.closeDeleteModal();
+            
+            if (this.activeCourse?.id === this.courseToDelete) {
+                this.closeCourseDetail();
             }
+            
+            this.courseToDelete = null;
+        } catch (error) {
+            this.showToast(error.message, 'error');
         }
     }
+}
 
     closeDeleteModal() {
         document.getElementById('delete-modal').style.display = 'none';
@@ -576,7 +712,7 @@ class SkillLvlUpApp {
                 title.innerHTML = '<i class="fas fa-edit"></i> Редактировать';
                 document.getElementById('lesson-title').value = lesson.title;
                 document.getElementById('lesson-duration').value = lesson.duration;
-                document.getElementById('lesson-date').value = lesson.date || this.getTodayDate();
+                document.getElementById('lesson-date').value = lesson.date || lesson.lesson_date || this.getTodayDate();
                 document.getElementById('lesson-description').value = lesson.description || '';
             }
         } else {
@@ -606,12 +742,8 @@ class SkillLvlUpApp {
                 });
                 this.showToast('Урок успешно добавлен!', 'success');
             }
-            
-            // ✅ ИСПРАВЛЕНИЕ: Полная перезагрузка курса с уроками
-            await this.loadCourseDetail(this.activeCourse.id);
+            await this.refreshAllData();
             this.closeLessonModal();
-            this.renderLessonList();  // ✅ Явный вызов рендера
-            this.renderDashboard();
         } catch (error) {
             this.showToast(error.message, 'error');
         }
@@ -625,10 +757,16 @@ class SkillLvlUpApp {
     deleteLesson(event, lessonId) {
         event.stopPropagation();
         if (!this.activeCourse) return;
+        
         if (confirm('Удалить урок?')) {
-            this.activeCourse.lessons = this.activeCourse.lessons.filter(l => l.id !== lessonId);
-            this.renderLessonList();
-            this.renderDashboard();
+            this.api.deleteLesson(lessonId)
+                .then(() => {
+                    this.showToast('Урок успешно удален!', 'success');
+                    this.refreshAllData();
+                })
+                .catch(error => {
+                    this.showToast(error.message, 'error');
+                });
         }
     }
 
@@ -641,15 +779,29 @@ class SkillLvlUpApp {
         tbody.innerHTML = this.courses.map(course => {
             const progress = this.getCourseProgress(course);
             const lessonsCount = (course.lessons || []).length;
-            const [badgeClass, status] = progress === 100 ? ['badge-success', 'Завершен'] : new Date(course.endDate) < new Date() ? ['badge-danger', 'Просрочен'] : ['badge-info', 'В процессе'];
-            return `<tr><td>${course.title}</td><td>${lessonsCount}</td><td><div class="progress-bar-bg" style="width: 100px; display: inline-block; vertical-align: middle; margin-right: 10px;"><div class="progress-bar-fill" style="width: ${progress}%"></div></div>${progress}%</td><td><span class="badge ${badgeClass}">${status}</span></td></tr>`;
+            const endDate = course.endDate || course.end_date;
+            const [badgeClass, status] = progress === 100 ? ['badge-success', 'Завершен'] : 
+                                        new Date(endDate) < new Date() ? ['badge-danger', 'Просрочен'] : 
+                                        ['badge-info', 'В процессе'];
+            return `<tr>
+                <td>${course.title}</td>
+                <td>${lessonsCount}</td>
+                <td>
+                    <div class="progress-bar-bg" style="width: 100px; display: inline-block; vertical-align: middle; margin-right: 10px;">
+                        <div class="progress-bar-fill" style="width: ${progress}%"></div>
+                    </div>
+                    ${progress}%
+                </td>
+                <td><span class="badge ${badgeClass}">${status}</span></td>
+            </tr>`;
         }).join('');
     }
 
     showToast(message, type = 'info') {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
-        const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle';
+        const icon = type === 'success' ? 'check-circle' : 
+                    type === 'error' ? 'exclamation-circle' : 'info-circle';
         toast.innerHTML = `<i class="fas fa-${icon}"></i><span>${message}</span>`;
         document.body.appendChild(toast);
         setTimeout(() => { 
@@ -663,6 +815,7 @@ class SkillLvlUpApp {
         this.calendar.init('calendar-widget');
         this.filesManager = new FilesManager(this);
         this.filesManager.init();
+        this.exportManager = new ExportManager(this);
     }
 
     getDateOffset(days) {
@@ -685,6 +838,419 @@ class SkillLvlUpApp {
         document.getElementById('app-layout').style.display = 'flex';
         this.updateUserInfo();
         this.navigateTo('dashboard');
+    }
+
+    getActivityData(days = 30) {
+        const activityData = {};
+        const now = new Date();
+        now.setHours(0, 0, 0, 0); 
+        for (let i = days - 1; i >= 0; i--) {
+            const date = new Date(now);
+            date.setDate(date.getDate() - i); 
+            const dateKey = date.toISOString().split('T')[0];
+            activityData[dateKey] = 0;
+        }
+        this.courses.forEach(course => {
+            const lessons = course.lessons || [];
+            lessons.forEach(lesson => {
+                if (lesson.completed) {
+                    let completedDate = lesson.completed_date || lesson.date || lesson.lesson_date;
+                    if (completedDate) {
+                        completedDate = new Date(completedDate).toISOString().split('T')[0];
+                        if (activityData.hasOwnProperty(completedDate)) {
+                            activityData[completedDate]++;
+                        }
+                    }
+                }
+            });
+        });
+        const labels = [];
+        const data = [];
+        
+        for (let i = days - 1; i >= 0; i--) {
+            const date = new Date(now);
+            date.setDate(date.getDate() - i); 
+            const dateKey = date.toISOString().split('T')[0];
+            labels.push(date.toLocaleDateString('ru-RU', { 
+                day: '2-digit', 
+                month: '2-digit' 
+            }));
+            data.push(activityData[dateKey] || 0);
+        }
+        
+        return { labels, data };
+    }
+    getTopicTimeData() {
+        const topicData = {};
+        
+        this.courses.forEach(course => {
+            const lessons = course.lessons || [];
+            lessons.forEach(lesson => {
+                const topic = course.title;
+                const duration = lesson.duration || 0;
+                
+                if (!topicData[topic]) {
+                    topicData[topic] = 0;
+                }
+                topicData[topic] += duration;
+            });
+        });
+        const labels = Object.keys(topicData);
+        const data = Object.values(topicData);
+        
+        return { labels, data };
+    }
+
+    renderCharts() {
+        const activityCtx = document.getElementById('activity-chart');
+        if (activityCtx) {
+            const activityData = this.getActivityData(30);
+            
+            if (this.activityChartInstance) {
+                this.activityChartInstance.destroy();
+            }
+            
+            this.activityChartInstance = new Chart(activityCtx, {
+                type: 'bar',
+                data: {
+                    labels: activityData.labels,
+                    datasets: [{
+                        label: 'Пройдено уроков',
+                        data: activityData.data,
+                        backgroundColor: 'rgba(79, 70, 229, 0.6)',
+                        borderColor: 'rgba(79, 70, 229, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        maxBarThickness: 30
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y + ' уроков';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1,
+                                callback: function(value) {
+                                    return value + ' ур.';
+                                }
+                            },
+                            grid: {
+                                color: '#e5e7eb'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: {
+                                    size: 10
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        const topicCtx = document.getElementById('topic-chart');
+        if (topicCtx) {
+            const topicData = this.getTopicTimeData();
+            
+            if (this.topicChartInstance) {
+                this.topicChartInstance.destroy();
+            }
+            
+            const colors = [
+                'rgba(79, 70, 229, 0.8)',
+                'rgba(16, 185, 129, 0.8)',
+                'rgba(245, 158, 11, 0.8)',
+                'rgba(239, 68, 68, 0.8)',
+                'rgba(99, 102, 241, 0.8)',
+                'rgba(14, 165, 233, 0.8)',
+                'rgba(139, 92, 246, 0.8)',
+                'rgba(236, 72, 153, 0.8)'
+            ];
+            
+            this.topicChartInstance = new Chart(topicCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: topicData.labels,
+                    datasets: [{
+                        data: topicData.data,
+                        backgroundColor: colors.slice(0, topicData.labels.length),
+                        borderColor: '#ffffff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 15,
+                                font: {
+                                    size: 11
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${label}: ${value} мин. (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    renderReports() {
+        const tbody = document.getElementById('reports-table-body');
+        
+        if (!this.courses.length) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="empty-state">
+                        <i class="fas fa-chart-bar"></i>
+                        <p>Нет данных</p>
+                    </td>
+                </tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = this.courses.map(course => {
+            const progress = this.getCourseProgress(course);
+            const lessonsCount = (course.lessons || []).length;
+            const endDate = course.endDate || course.end_date;
+            const [badgeClass, status] = progress === 100 ? ['badge-success', 'Завершен'] : 
+                                        new Date(endDate) < new Date() ? ['badge-danger', 'Просрочен'] : 
+                                        ['badge-info', 'В процессе'];
+            return `<tr>
+                <td>${course.title}</td>
+                <td>${lessonsCount}</td>
+                <td>
+                    <div class="progress-bar-bg" style="width: 100px; display: inline-block; vertical-align: middle; margin-right: 10px;">
+                        <div class="progress-bar-fill" style="width: ${progress}%"></div>
+                    </div>
+                    ${progress}%
+                </td>
+                <td><span class="badge ${badgeClass}">${status}</span></td>
+            </tr>`;
+        }).join('');
+        
+        setTimeout(() => {
+            this.renderCharts();
+        }, 100);
+    }
+
+    refreshCharts() {
+        if (this.currentPage === 'reports') {
+            this.renderCharts();
+        }
+    }
+
+    animateProgressUpdate(courseId, newProgress) {
+        const progressBars = document.querySelectorAll(`[data-course-id="${courseId}"] .progress-bar-fill`);
+        const progressTexts = document.querySelectorAll(`[data-course-id="${courseId}"] .progress-row span:first-child`);
+        const courseCards = document.querySelectorAll(`[data-course-id="${courseId}"]`);
+        
+        progressBars.forEach(bar => {
+            const oldWidth = bar.style.width;
+            
+            bar.classList.add('updating');
+            
+            requestAnimationFrame(() => {
+                bar.style.width = `${newProgress}%`;
+            });
+            
+            setTimeout(() => {
+                bar.classList.remove('updating');
+                if (newProgress === 100) {
+                    bar.classList.add('completed');
+                }
+            }, 600);
+        });
+        
+        progressTexts.forEach(text => {
+            const oldText = text.textContent;
+            text.classList.add('updated');
+            text.textContent = `${newProgress}%`;
+            
+            setTimeout(() => {
+                text.classList.remove('updated');
+            }, 400);
+        });
+        
+        // Анимация для карточки курса
+        courseCards.forEach(card => {
+            card.classList.add('progress-updated');
+            setTimeout(() => {
+                card.classList.remove('progress-updated');
+            }, 500);
+        });
+        
+        // Обновляем прогресс в деталях курса если открыт
+        if (this.activeCourse && this.activeCourse.id === courseId) {
+            const detailProgress = document.getElementById('detail-course-progress');
+            const detailBar = document.getElementById('detail-progress-bar');
+            const detailHeader = document.querySelector('.detail-progress-header');
+            
+            if (detailProgress) {
+                detailProgress.classList.add('updated');
+                detailProgress.textContent = `${newProgress}%`;
+                setTimeout(() => {
+                    detailProgress.classList.remove('updated');
+                }, 400);
+            }
+            
+            if (detailBar) {
+                detailBar.classList.add('updating');
+                requestAnimationFrame(() => {
+                    detailBar.style.width = `${newProgress}%`;
+                });
+                setTimeout(() => {
+                    detailBar.classList.remove('updating');
+                    if (newProgress === 100) {
+                        detailBar.classList.add('completed');
+                    }
+                }, 600);
+            }
+            
+            if (detailHeader) {
+                detailHeader.classList.add('updated');
+                setTimeout(() => {
+                    detailHeader.classList.remove('updated');
+                }, 500);
+            }
+        }
+    }
+
+    validateProfileName(name) {
+        if (!name || typeof name !== 'string') {
+            return { valid: false, message: 'Имя обязательно' };
+        }
+        
+        const trimmedName = name.trim();
+        
+        if (trimmedName.length < 2) {
+            return { valid: false, message: 'Имя должно содержать минимум 2 символа' };
+        }
+        
+        if (trimmedName.length > 50) {
+            return { valid: false, message: 'Имя не должно превышать 50 символов' };
+        }
+        
+        // ✅ Разрешаем кириллицу, латиницу, пробелы, дефисы и апострофы
+        const nameRegex = /^[a-zA-Zа-яА-ЯёЁ\s'-]+$/;
+        if (!nameRegex.test(trimmedName)) {
+            return { 
+                valid: false, 
+                message: 'Имя может содержать только буквы, пробелы, дефисы и апострофы' 
+            };
+        }
+        
+        return { valid: true, name: trimmedName };
+    }
+
+    validateProfileEmail(email) {
+        if (!email || typeof email !== 'string') {
+            return { valid: false, message: 'Email обязателен' };
+        }
+        
+        const trimmedEmail = email.trim().toLowerCase();
+        
+        // ✅ Проверка формата email
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(trimmedEmail)) {
+            return { 
+                valid: false, 
+                message: 'Неверный формат email. Пример: user@example.com' 
+            };
+        }
+        
+        // ✅ Проверка домена
+        const domain = trimmedEmail.split('@')[1];
+        const validDomains = ['.com', '.ru', '.org', '.net', '.edu', '.gov', '.io', '.co', '.by', '.kz', '.ua'];
+        const hasValidDomain = validDomains.some(tld => domain.endsWith(tld));
+        
+        if (!hasValidDomain) {
+            return { 
+                valid: false, 
+                message: 'Недопустимый домен email. Используйте .com, .ru, .org и т.д.' 
+            };
+        }
+        
+        return { valid: true, email: trimmedEmail };
+    }
+
+    // ✅ ОБНОВЛЕННЫЙ МЕТОД: Обновление профиля с валидацией
+    async updateProfile(name, email) {
+        // ✅ Валидация имени
+        const nameValidation = this.validateProfileName(name);
+        if (!nameValidation.valid) {
+            this.showToast(nameValidation.message, 'error');
+            return false;
+        }
+        
+        // ✅ Валидация email
+        const emailValidation = this.validateProfileEmail(email);
+        if (!emailValidation.valid) {
+            this.showToast(emailValidation.message, 'error');
+            return false;
+        }
+        
+        // ✅ Если имя не изменилось, не отправляем его
+        const updateData = {};
+        if (nameValidation.name !== this.currentUser.name) {
+            updateData.name = nameValidation.name;
+        }
+        if (emailValidation.email !== this.currentUser.email) {
+            updateData.email = emailValidation.email;
+        }
+        
+        
+        
+        try {
+            await this.api.updateProfile(updateData.name, updateData.email);
+            
+            // ✅ Обновляем данные пользователя
+            this.currentUser.name = updateData.name || this.currentUser.name;
+            this.currentUser.email = updateData.email || this.currentUser.email;
+            this.currentUser.initials = this.getInitials(this.currentUser.name);
+            
+            this.updateUserInfo();
+            this.showToast('Профиль успешно обновлён!', 'success');
+            return true;
+        } catch (error) {
+            this.showToast(error.message, 'error');
+            return false;
+        }
     }
 
     bindEvents() {
@@ -721,7 +1287,8 @@ class SkillLvlUpApp {
         $('cancel-course')?.addEventListener('click', () => this.closeCourseModal());
         $('new-course-form')?.addEventListener('submit', (e) => {
             e.preventDefault();
-            this.saveCourse($('course-title').value, $('course-description').value, $('course-start-date').value, $('course-end-date').value);
+            this.saveCourse($('course-title').value, $('course-description').value, 
+                           $('course-start-date').value, $('course-end-date').value);
         });
         $('course-modal')?.addEventListener('click', (e) => {
             if (e.target.id === 'course-modal') this.closeCourseModal();
@@ -730,7 +1297,8 @@ class SkillLvlUpApp {
         $('cancel-lesson')?.addEventListener('click', () => this.closeLessonModal());
         $('new-lesson-form')?.addEventListener('submit', (e) => {
             e.preventDefault();
-            this.saveLesson($('lesson-title').value, $('lesson-duration').value, $('lesson-date').value, $('lesson-description').value);
+            this.saveLesson($('lesson-title').value, $('lesson-duration').value, 
+                           $('lesson-date').value, $('lesson-description').value);
         });
         $('lesson-modal')?.addEventListener('click', (e) => {
             if (e.target.id === 'lesson-modal') this.closeLessonModal();
@@ -779,13 +1347,23 @@ class SkillLvlUpApp {
             } catch (error) {
                 this.showToast(error.message, 'error');
             }
+            await this.updateProfile(name, email);
         });
 
-        $('export-pdf')?.addEventListener('click', () => this.showToast('PDF в полной версии', 'info'));
-        $('export-excel')?.addEventListener('click', () => this.showToast('Excel в полной версии', 'info'));
+        $('export-pdf')?.addEventListener('click', async () => {
+            if (this.exportManager) {
+                await this.exportManager.exportToPDF(); // ✅ Добавлен await
+            }
+        });
+        
+        $('export-excel')?.addEventListener('click', () => {
+            if (this.exportManager) {
+                this.exportManager.exportToXLSX();
+            }
+        });
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => { 
-    window.app = new SkillLvlUpApp(); 
+document.addEventListener('DOMContentLoaded', () => {
+    window.app = new SkillLvlUpApp();
 });

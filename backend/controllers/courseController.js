@@ -2,8 +2,6 @@ const Course = require('../models/Course');
 const Lesson = require('../models/Lesson');
 const File = require('../models/File');
 
-// Получить все курсы пользователя
-// Получить все курсы пользователя
 exports.getCourses = async (req, res) => {
     try {
         const { status, search, sort } = req.query;
@@ -14,7 +12,6 @@ exports.getCourses = async (req, res) => {
         const coursesWithProgress = await Promise.all(
             courses.map(async (course) => {
                 const progress = await Course.getProgress(course.id);
-                // ✅ ДОБАВИТЬ: Загрузка уроков для каждого курса
                 const lessons = await Lesson.findAllByCourse(course.id);
                 
                 return {
@@ -37,7 +34,7 @@ exports.getCourse = async (req, res) => {
     try {
         const { id } = req.params;
         const course = await Course.findById(id);
-
+        
         if (!course) {
             return res.status(404).json({ error: 'Курс не найден' });
         }
@@ -64,7 +61,7 @@ exports.getCourse = async (req, res) => {
 exports.createCourse = async (req, res) => {
     try {
         const { title, description, start_date, end_date } = req.body;
-
+        
         if (!title || !start_date || !end_date) {
             return res.status(400).json({ error: 'Название, дата начала и окончания обязательны' });
         }
@@ -92,7 +89,7 @@ exports.updateCourse = async (req, res) => {
     try {
         const { id } = req.params;
         const { title, description, start_date, end_date, status } = req.body;
-
+        
         const course = await Course.findById(id);
         if (!course) {
             return res.status(404).json({ error: 'Курс не найден' });
@@ -105,10 +102,9 @@ exports.updateCourse = async (req, res) => {
         const updated = await Course.update(
             id,
             title || course.title,
-            description ?? course.description,
+            description !== undefined ? description : course.description,
             start_date || course.start_date,
-            end_date || course.end_date,
-            status || course.status
+            end_date || course.end_date
         );
 
         res.json({
@@ -125,7 +121,7 @@ exports.updateCourse = async (req, res) => {
 exports.deleteCourse = async (req, res) => {
     try {
         const { id } = req.params;
-
+        
         const course = await Course.findById(id);
         if (!course) {
             return res.status(404).json({ error: 'Курс не найден' });
@@ -176,7 +172,7 @@ exports.createLesson = async (req, res) => {
     try {
         const { courseId } = req.params;
         const { title, description, duration, lesson_date } = req.body;
-
+        
         const course = await Course.findById(courseId);
         if (!course) {
             return res.status(404).json({ error: 'Курс не найден' });
@@ -209,7 +205,7 @@ exports.updateLesson = async (req, res) => {
     try {
         const { id } = req.params;
         const { title, description, duration, lesson_date, completed } = req.body;
-
+        
         const lesson = await Lesson.findById(id);
         if (!lesson) {
             return res.status(404).json({ error: 'Урок не найден' });
@@ -239,11 +235,12 @@ exports.updateLesson = async (req, res) => {
     }
 };
 
-// Переключить статус выполнения
+
+// ✅ ОБНОВЛЕННО: Переключить статус выполнения с логированием активности
 exports.toggleComplete = async (req, res) => {
     try {
         const { id } = req.params;
-
+        
         const lesson = await Lesson.findById(id);
         if (!lesson) {
             return res.status(404).json({ error: 'Урок не найден' });
@@ -322,7 +319,7 @@ exports.deleteLesson = async (req, res) => {
 exports.uploadFile = async (req, res) => {
     try {
         const { lessonId } = req.params;
-
+        
         if (!req.file) {
             return res.status(400).json({ error: 'Файл не загружен' });
         }
@@ -360,7 +357,7 @@ exports.uploadFile = async (req, res) => {
 exports.deleteFile = async (req, res) => {
     try {
         const { fileId } = req.params;
-
+        
         const file = await File.findById(fileId);
         if (!file) {
             return res.status(404).json({ error: 'Файл не найден' });

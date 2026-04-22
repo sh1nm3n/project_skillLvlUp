@@ -5,21 +5,19 @@ COLLATE utf8mb4_unicode_ci;
 
 USE skilllvlup;
 
--- Таблица пользователей
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
     role ENUM('user', 'admin') DEFAULT 'user',
-    avatar VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_email (email),
     INDEX idx_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Таблица курсов
+
 CREATE TABLE courses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
@@ -27,7 +25,6 @@ CREATE TABLE courses (
     description TEXT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    status ENUM('active', 'completed', 'archived') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -36,7 +33,7 @@ CREATE TABLE courses (
     INDEX idx_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Таблица уроков
+
 CREATE TABLE lessons (
     id INT AUTO_INCREMENT PRIMARY KEY,
     course_id INT NOT NULL,
@@ -45,7 +42,6 @@ CREATE TABLE lessons (
     duration INT DEFAULT 0 COMMENT 'Продолжительность в минутах',
     lesson_date DATE NULL,
     completed BOOLEAN DEFAULT FALSE,
-    lesson_order INT DEFAULT 0,
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -55,7 +51,7 @@ CREATE TABLE lessons (
     INDEX idx_order (lesson_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Таблица файлов
+
 CREATE TABLE files (
     id INT AUTO_INCREMENT PRIMARY KEY,
     lesson_id INT NOT NULL,
@@ -69,18 +65,7 @@ CREATE TABLE files (
     INDEX idx_lesson_id (lesson_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Таблица заметок
-CREATE TABLE notes (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    lesson_id INT NOT NULL UNIQUE,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE,
-    INDEX idx_lesson_id (lesson_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Таблица активности пользователей (для отчетов)
 CREATE TABLE user_activity (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
@@ -93,7 +78,7 @@ CREATE TABLE user_activity (
     INDEX idx_activity_type (activity_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Триггер для автоматического обновления updated_at
+
 DELIMITER $$
 CREATE TRIGGER before_user_update 
 BEFORE UPDATE ON users

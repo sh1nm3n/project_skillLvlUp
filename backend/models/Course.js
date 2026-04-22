@@ -13,50 +13,43 @@ class Course {
 
     // Получить все курсы пользователя
     static async findAllByUser(userId, filters = {}) {
-        let sql = `
-            SELECT c.*, 
-                   COUNT(l.id) as total_lessons,
-                   COUNT(CASE WHEN l.completed = TRUE THEN 1 END) as completed_lessons
-            FROM courses c
-            LEFT JOIN lessons l ON c.id = l.course_id
-            WHERE c.user_id = ?
-        `;
+        const { status, search, sort } = filters;
+        
+        let sql = `SELECT * FROM courses WHERE user_id = ?`;
         const params = [userId];
 
-        if (filters.status) {
-            sql += ' AND c.status = ?';
-            params.push(filters.status);
+        // ✅ Фильтрация по датам вместо status
+        if (status === 'active') {
+            sql += ` AND end_date >= CURDATE()`;
+        } else if (status === 'completed') {
+            // Нужно будет добавить логику проверки прогресса
+        } else if (status === 'archived') {
+            sql += ` AND end_date < CURDATE()`;
         }
 
-        if (filters.search) {
-            sql += ' AND (c.title LIKE ? OR c.description LIKE ?)';
-            params.push(`%${filters.search}%`, `%${filters.search}%`);
+        if (search) {
+            sql += ` AND (title LIKE ? OR description LIKE ?)`;
+            params.push(`%${search}%`, `%${search}%`);
         }
 
-        sql += ' GROUP BY c.id';
-
-        if (filters.sort === 'progress') {
-            sql += ' ORDER BY completed_lessons / total_lessons DESC';
-        } else if (filters.sort === 'deadline') {
-            sql += ' ORDER BY c.end_date ASC';
+        // Сортировка
+        if (sort === 'name') {
+            sql += ` ORDER BY title ASC`;
+        } else if (sort === 'deadline') {
+            sql += ` ORDER BY end_date ASC`;
+        } else if (sort === 'progress') {
+            sql += ` ORDER BY created_at DESC`;
         } else {
-            sql += ' ORDER BY c.created_at DESC';
+            sql += ` ORDER BY created_at DESC`;
         }
 
-        return await query(sql, params);
+        const courses = await query(sql, params);
+        return courses;
     }
 
     // Получить курс по ID
     static async findById(id) {
-        const sql = `
-            SELECT c.*, 
-                   COUNT(l.id) as total_lessons,
-                   COUNT(CASE WHEN l.completed = TRUE THEN 1 END) as completed_lessons
-            FROM courses c
-            LEFT JOIN lessons l ON c.id = l.course_id
-            WHERE c.id = ?
-            GROUP BY c.id
-        `;
+        const sql = 'SELECT * FROM courses WHERE id = ?';
         const courses = await query(sql, [id]);
         return courses[0] || null;
     }
@@ -65,10 +58,18 @@ class Course {
     static async update(id, title, description, startDate, endDate, status) {
         const sql = `
             UPDATE courses 
-            SET title = ?, description = ?, start_date = ?, end_date = ?, status = ?
+            SET title = ?, description = ?, start_date = ?, end_date = ?
             WHERE id = ?
         `;
-        await query(sql, [title, description, startDate, endDate, status, id]);
+        const params = [
+        title || null,
+        description !== undefined ? description : null,
+        startDate || null,
+        endDate || null,
+        id
+    ];
+    
+        await query(sql, params);
         return this.findById(id);
     }
 

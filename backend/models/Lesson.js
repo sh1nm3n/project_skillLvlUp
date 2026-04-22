@@ -16,7 +16,7 @@ class Lesson {
         const sql = `
             SELECT * FROM lessons
             WHERE course_id = ?
-            ORDER BY lesson_order ASC, created_at ASC
+            ORDER BY created_at ASC
         `;
         return await query(sql, [courseId]);
     }

@@ -1,10 +1,10 @@
 const { query } = require('../config/database');
 
-// Получить статистику пользователя
+// ✅ ОБНОВЛЕННО: Получить статистику пользователя с активностью
 exports.getUserStats = async (req, res) => {
     try {
         const userId = req.user.id;
-
+        
         const stats = await query(`
             SELECT 
                 COUNT(DISTINCT c.id) as total_courses,
@@ -31,7 +31,7 @@ exports.getUserStats = async (req, res) => {
 exports.getDeadlines = async (req, res) => {
     try {
         const userId = req.user.id;
-
+        
         const deadlines = await query(`
             SELECT 
                 c.id,
@@ -59,7 +59,7 @@ exports.getDeadlines = async (req, res) => {
 exports.getActivityByDays = async (req, res) => {
     try {
         const userId = req.user.id;
-
+        
         const activity = await query(`
             SELECT 
                 DATE(activity_date) as date,
@@ -81,7 +81,7 @@ exports.getActivityByDays = async (req, res) => {
 exports.exportReport = async (req, res) => {
     try {
         const userId = req.user.id;
-
+        
         const courses = await query(`
             SELECT 
                 c.title,

@@ -1,4 +1,3 @@
-// frontend/api-service.js
 class ApiService {
     constructor(baseUrl = 'http://localhost:3000/api') {
         this.baseUrl = baseUrl;
@@ -29,6 +28,10 @@ class ApiService {
             const data = await response.json();
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    this.clearToken();
+                    if (window.app) window.app.logout();
+                }
                 throw new Error(data.error || 'Ошибка запроса');
             }
 
@@ -39,7 +42,6 @@ class ApiService {
         }
     }
 
-    // Auth
     async login(email, password) {
         const data = await this.request('/auth/login', {
             method: 'POST',
@@ -63,13 +65,12 @@ class ApiService {
     }
 
     async updateProfile(name, email) {
-        return await this.request('/auth/profile', {
+        return await this.request('/auth/profile', { 
             method: 'PUT',
             body: JSON.stringify({ name, email })
         });
     }
 
-    // Courses
     async getCourses(filters = {}) {
         const params = new URLSearchParams(filters).toString();
         return await this.request(`/courses${params ? '?' + params : ''}`);
@@ -79,7 +80,7 @@ class ApiService {
         return await this.request(`/courses/${id}`);
     }
 
-    async createCourse(data) {
+    async createCourse(data) { 
         return await this.request('/courses', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -87,6 +88,11 @@ class ApiService {
     }
 
     async updateCourse(id, data) {
+    // ✅ ИСПРАВЛЕНО: Проверяем что data существует
+        if (!data || typeof data !== 'object') {
+            throw new Error('Неверные данные для обновления курса');
+        }
+        
         return await this.request(`/courses/${id}`, {
             method: 'PUT',
             body: JSON.stringify(data)
@@ -94,10 +100,9 @@ class ApiService {
     }
 
     async deleteCourse(id) {
-        return await this.request(`/courses/${id}`, { method: 'DELETE' });
+        return await this.request(`/courses/${id}`, { method: 'DELETE' }); 
     }
 
-    // Lessons
     async getLessons(courseId) {
         return await this.request(`/courses/${courseId}/lessons`);
     }
@@ -133,7 +138,6 @@ class ApiService {
         return await this.request(`/courses/lessons/${id}`, { method: 'DELETE' });
     }
 
-    // Files
     async uploadFile(lessonId, file) {
         const formData = new FormData();
         formData.append('file', file);
@@ -153,7 +157,6 @@ class ApiService {
         return await this.request(`/courses/files/${fileId}`, { method: 'DELETE' });
     }
 
-    // Reports
     async getStats() {
         return await this.request('/reports/stats');
     }
@@ -170,5 +173,4 @@ class ApiService {
     }
 }
 
-// ✅ Экспорт для глобального доступа
 window.ApiService = ApiService;

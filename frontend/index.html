@@ -6,6 +6,10 @@
     <title>SkillLvlUp - Платформа для обучения</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
     <!-- Auth Container -->
@@ -101,10 +105,6 @@
                     <h1 id="page-title">Главная</h1>
                     <p class="text-muted" id="page-subtitle">Добро пожаловать в систему обучения</p>
                 </div>
-                <button class="btn btn-primary" id="new-course-btn">
-                    <i class="fas fa-plus"></i>
-                    Новый курс
-                </button>
             </header>
 
             <!-- Dashboard Page -->
@@ -190,6 +190,10 @@
                             <option value="deadline">По дедлайну</option>
                         </select>
                     </div>
+                    <button class="btn btn-primary" id="new-course-btn">
+                        <i class="fas fa-plus"></i>
+                            Новый курс
+                    </button>
                 </div>
                 <div class="course-list" id="courses-page-list">
                     <!-- Courses will be rendered here -->
@@ -205,9 +209,6 @@
                     <div class="course-actions">
                         <button class="btn btn-secondary btn-sm" id="edit-course-btn">
                             <i class="fas fa-edit"></i> Редактировать курс
-                        </button>
-                        <button class="btn btn-danger btn-sm" id="delete-course-btn">
-                            <i class="fas fa-trash"></i> Удалить курс
                         </button>
                         <button class="btn btn-primary btn-sm" id="add-lesson-btn">
                             <i class="fas fa-plus"></i> Добавить урок
@@ -256,10 +257,10 @@
                 <div class="header-row">
                     <h2>Отчет об успеваемости</h2>
                     <div class="export-btns">
-                        <button class="btn btn-secondary btn-sm" id="export-pdf">
+                        <button class="export-btn pdf" id="export-pdf">
                             <i class="fas fa-file-pdf"></i> Выгрузка PDF
                         </button>
-                        <button class="btn btn-secondary btn-sm" id="export-excel">
+                        <button class="export-btn xlsx" id="export-excel">
                             <i class="fas fa-file-excel"></i> Выгрузка XLSX
                         </button>
                     </div>
@@ -268,20 +269,14 @@
                 <div class="charts-grid">
                     <div class="card">
                         <h3>График активности по дням</h3>
-                        <div class="chart-placeholder" id="activity-chart">
-                            <div class="chart-icon">
-                                <i class="fas fa-chart-line"></i>
-                                <p>График будет отображен здесь</p>
-                            </div>
+                        <div style="height: 250px; position: relative;">
+                            <canvas id="activity-chart"></canvas>
                         </div>
                     </div>
                     <div class="card">
                         <h3>Распределение времени по темам</h3>
-                        <div class="chart-placeholder" id="topics-chart">
-                            <div class="chart-icon">
-                                <i class="fas fa-chart-pie"></i>
-                                <p>Диаграмма будет отображена здесь</p>
-                            </div>
+                        <div style="height: 250px; position: relative;">
+                            <canvas id="topic-chart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -368,8 +363,8 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="lesson-duration">Продолжительность (минут)</label>
-                        <input type="number" id="lesson-duration" placeholder="30" min="1" required>
+                        <label for="lesson-duration">Продолжительность</label>
+                        <input type="number" id="lesson-duration" placeholder="минуты" min="1" required>
                     </div>
                     <div class="form-group">
                         <label for="lesson-date">Дата урока</label>
@@ -469,5 +464,6 @@
     <script src="js/files-manager.js"></script>\
     <script src="api-service.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/export-manager.js"></script>
 </body>
 </html>

@@ -1,5 +1,4 @@
-// Calendar Module - Календарь для SkillLvlUp
-
+// Calendar Module - Календарь для SkillLUp с отображением уроков и курсов
 class CalendarManager {
     constructor(app) {
         this.app = app;
@@ -22,11 +21,8 @@ class CalendarManager {
         const year = this.currentDate.getFullYear();
         const month = this.currentDate.getMonth();
         
-        const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
-                           'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
-        
         const fullMonthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                               'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+                                'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);
@@ -55,7 +51,7 @@ class CalendarManager {
                 </div>
             </div>
             <div class="calendar-widget-events" id="cal-selected-events">
-                <p class="text-muted" style="font-size: 0.85rem;">Выберите дату</p>
+                <p class="text-muted" style="font-size: 0.85rem;">Выберите дату для просмотра событий</p>
             </div>
         `;
 
@@ -65,32 +61,42 @@ class CalendarManager {
     renderDays(startDay, totalDays, month, year, today) {
         let html = '';
         
-        // Previous month days
         const prevMonthLastDay = new Date(year, month, 0).getDate();
         for (let i = startDay - 1; i >= 0; i--) {
             const day = prevMonthLastDay - i;
             html += `<div class="cal-day other-month">${day}</div>`;
         }
 
-        // Current month days
         for (let day = 1; day <= totalDays; day++) {
             const currentDate = new Date(year, month, day);
             const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isToday = currentDate.getTime() === today.getTime();
             const isSelected = this.selectedDate === dateKey;
+            
+            // ✅ Получаем события для этой даты
             const events = this.app.getEventsForDate(dateKey);
-            const hasEvents = events.length > 0;
+            const hasDeadlines = events.some(e => e.type === 'deadline');
+            const hasLessons = events.some(e => e.type === 'lesson');
+
+            // ✅ Определяем классы для индикаторов
+            let indicators = '';
+            if (hasDeadlines && hasLessons) {
+                indicators = '<span class="cal-event-dot deadline"></span><span class="cal-event-dot lesson"></span>';
+            } else if (hasDeadlines) {
+                indicators = '<span class="cal-event-dot deadline"></span>';
+            } else if (hasLessons) {
+                indicators = '<span class="cal-event-dot lesson"></span>';
+            }
 
             html += `
                 <div class="cal-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" 
                     data-date="${dateKey}">
                     <span class="cal-day-number">${day}</span>
-                    ${hasEvents ? '<span class="cal-event-dot"></span>' : ''}
+                    ${indicators}
                 </div>
             `;
         }
 
-        // Next month days
         const remainingDays = 42 - (startDay + totalDays);
         for (let day = 1; day <= remainingDays; day++) {
             html += `<div class="cal-day other-month">${day}</div>`;
@@ -110,7 +116,6 @@ class CalendarManager {
             this.render();
         });
 
-        // Day click handlers
         this.container.querySelectorAll('.cal-day:not(.other-month)').forEach(day => {
             day.addEventListener('click', () => {
                 this.selectedDate = day.dataset.date;
@@ -128,31 +133,64 @@ class CalendarManager {
         const dateObj = new Date(this.selectedDate);
         const dateStr = dateObj.toLocaleDateString('ru-RU', { 
             day: 'numeric', 
-            month: 'long' 
+            month: 'long',
+            year: 'numeric'
         });
 
         if (events.length === 0) {
             container.innerHTML = `
                 <p><strong>${dateStr}</strong></p>
-                <p class="text-muted" style="font-size: 0.85rem; margin-top: 5px;">Нет событий</p>
+                <p class="text-muted" style="font-size: 0.85rem; margin-top: 5px;">
+                    <i class="fas fa-check-circle"></i> Нет запланированных событий
+                </p>
             `;
             return;
         }
 
-        container.innerHTML = `
-            <p style="margin-bottom: 10px;"><strong>${dateStr}</strong></p>
-            ${events.map(event => `
-                <div class="cal-event-item ${event.type}">
-                    <i class="fas ${event.type === 'deadline' ? 'fa-flag' : 'fa-book-open'}"></i>
-                    <span>${event.title.replace(/^[^\s]+\s/, '')}</span>
-                </div>
-            `).join('')}
-        `;
+        const deadlines = events.filter(e => e.type === 'deadline');
+        const lessons = events.filter(e => e.type === 'lesson');
+
+        let html = `<p style="margin-bottom: 15px;"><strong>${dateStr}</strong></p>`;
+
+        // ✅ Дедлайны курсов
+        if (deadlines.length > 0) {
+            html += `<p style="font-size: 0.8rem; color: var(--danger); margin-bottom: 8px;">
+                <i class="fas fa-flag"></i> Дедлайны курсов
+            </p>`;
+            deadlines.forEach(event => {
+                html += `
+                    <div class="cal-event-item deadline" onclick="app.openCourseDetail(${event.course.id})">
+                        <i class="fas fa-flag"></i>
+                        <span>${event.title.replace('📅 Дедлайн: ', '')}</span>
+                    </div>
+                `;
+            });
+        }
+
+        // ✅ Уроки
+        if (lessons.length > 0) {
+            html += `<p style="font-size: 0.8rem; color: var(--success); margin: 15px 0 8px;">
+                <i class="fas fa-book-open"></i> Уроки
+            </p>`;
+            lessons.forEach(event => {
+                const completedClass = event.completed ? 'completed' : '';
+                html += `
+                    <div class="cal-event-item lesson ${completedClass}" 
+                         onclick="app.openCourseDetail(${event.course.id})">
+                        <i class="fas fa-book-open"></i>
+                        <span class="${completedClass ? 'text-muted' : ''}">
+                            ${event.title.replace('📚 ', '')}
+                            ${event.completed ? ' (✓ Пройден)' : ''}
+                        </span>
+                    </div>
+                `;
+            });
+        }
+
+        container.innerHTML = html;
     }
 
-    bindEvents() {
-        // Events are bound in render
-    }
+    bindEvents() {}
 
     refresh() {
         this.render();
@@ -162,5 +200,4 @@ class CalendarManager {
     }
 }
 
-// Export for use in app.js
 window.CalendarManager = CalendarManager;
